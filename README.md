@@ -7,9 +7,9 @@
 **MATLAB Land Surface Model**  
 **MATLAB 陆面模式**
 
-MATLSM 是一个使用 MATLAB 开发的全球离线逐日陆面模式。模型在每个陆地网格上联合计算冠层、积雪、土壤水分、土壤温度以及地表水热通量，并逐网格、逐日检查水量、地表能量和土壤热储量守恒。
+MATLSM 是一个使用 MATLAB 开发、面向全球多年到百年变化研究的离线逐日陆面模式。模型在每个陆地网格上联合计算冠层、积雪、三层土壤、概念地下水和地表水热通量，并逐网格、逐日检查水量、地表能量和土壤热储量守恒。
 
-版本 1.0 的定位是：结构清晰、数值稳定、便于诊断和继续开发的科研型陆面模式。它适合开展多年全球离线试验、土壤湿度和蒸散研究、参数敏感性分析以及新参数化方案的原型验证；它不是完整的地球系统模式，也不包含大气反馈或河道路由。
+模式的定位不是复现暴雨分钟尺度湿润锋，而是在日强迫能够支持的信息尺度上，用少量、可解释、可率定的蓄水—产流关系稳定描述长期土壤湿度、蒸散、地下水补给和径流变化。空间运算采用 MATLAB 全矩阵化实现，并支持在线时间聚合输出，以服务全球 50–100 年模拟。
 
 ---
 
@@ -20,26 +20,27 @@ MATLSM 是一个使用 MATLAB 开发的全球离线逐日陆面模式。模型�
 - 冠层截留、穿透降雨、冠层蒸发和露水；
 - 雨雪相态划分、积雪、升华和能量受限融雪；
 - 0–7、7–28、28–100 cm 三层土壤水热状态；
-- Green–Ampt 显式近似入渗；
-- 超渗径流、孔隙超量径流、层间重力排水和基流；
+- VIC/新安江式次网格蓄水容量曲线和饱和超量产流；
+- 三层重力排水、湿润壤中流、地下水补给、毛管上升和慢速基流；
 - 土壤蒸发、植被蒸腾及分层根系吸水；
 - 短波、长波、感热、潜热和地表土壤热通量；
 - 隐式三层土壤热传导；
 - LAI 和 FVC 完整逐日输入或 365 日气候态循环；
 - 多变量、多数据集、多土层、面积加权的观测评估；
 - MATLAB 单元测试与逐日守恒诊断。
+- 可按 1、30、365 天等固定窗口在线平均输出，避免百年模拟保存全部逐日场。
 
 模式空间运算采用矩阵化实现，时间维顺序积分，因为土壤水分、土壤温度、冠层水和积雪均为具有记忆的状态变量。
 
 ---
 
-## 2. 版本 1.0 科学边界
+## 2. 科学边界
 
 MATLSM 1.0 重点描述网格尺度的垂直陆面水热过程。目前尚未包含：
 
 - 亚日降水强度和连续暴雨湿润锋记忆；
 - Richards 方程及基质势驱动的双向土壤水运动；
-- 动态地下水位和毛管上升；
+- 由地形和含水层参数求解的物理地下水位；当前地下水是垂向概念活动库；
 - 土壤液态水—冰分离及冻土水热耦合；
 - 多层积雪、雪密度和雪温；
 - 侧向汇流、河道路由和湖泊；
@@ -47,7 +48,7 @@ MATLSM 1.0 重点描述网格尺度的垂直陆面水热过程。目前尚未包
 - 植被碳循环、动态生长、CO₂ 生理响应和土地利用变化；
 - 大气耦合反馈。
 
-因此，1.0 版适合离线陆面过程研究和参数化开发，不应直接视为已经充分率定的业务预报系统。数值守恒通过仅说明源汇记账一致，不代表所有过程均已达到观测精度。
+因此，本模式适合全球长期陆面变化、离线归因和参数化开发，不用于短历时洪峰预报。数值守恒通过仅说明源汇记账一致，不代表参数已经完成全球率定。
 
 ---
 
@@ -154,6 +155,54 @@ report       % 守恒和物理范围汇总
 ```
 
 多年数组使用 `-v7.3` 保存。100 年或大型集合模拟建议按年分块输出并保存 restart，而不是一次性在内存中保存全部逐日变量。
+
+### 4.4 自动参数率定
+
+运行 `Calibration/A1_Calibrate.m`，或直接调用：
+
+```matlab
+cal = lsm.calibration_config("surrogateopt","soil_moisture_Root");
+cal.max_evaluations = 40;
+result = lsm.calibrate(input_data,Obs,cfg,cal);
+```
+
+优化方法和最重要的输出均可直接选择：
+
+| `cal.method` | 适用情况 |
+|---|---|
+| `"surrogateopt"` | 默认；昂贵、非光滑目标的少次数全局搜索 |
+| `"patternsearch"` | 已有较好初值时的稳健局部搜索或精修 |
+| `"particleswarm"` | 更强全局探索，但通常需要更多模拟次数 |
+| `"fminsearch"` | 无全局优化工具箱时的局部后备方法 |
+| `"auto"` | 按本机可用工具箱自动选择 |
+
+可以同时率定多个输出并设置重要性：
+
+```matlab
+cal.targets = ["soil_moisture_Root";"evapotranspiration";"latent_heat"];
+cal.target_weights = [0.6;0.3;0.1];
+```
+
+损失函数对每个变量、数据集和土层分别计算面积加权 NRMSE 与相关系数：
+
+```text
+loss = (1-alpha)*NRMSE + alpha*(1-correlation)
+```
+
+所以 K、m³ m⁻³、mm day⁻¹ 和 W m⁻² 可以共同率定而不被单位大小支配。
+默认 `alpha=0.20`；若只优化误差幅度，可设置 `cal.metric="nrmse"`。
+
+快速阶段默认使用连续3年、首年spin-up和经纬方向每4格抽1格，约为完整全球
+空间计算量的1/16。搜索期间只保存目标输出；获得最优参数后，可自动在完整
+网格和完整时段复验：
+
+```matlab
+cal.run_full_validation = true;
+```
+
+默认参数集合按目标变量自动选择，也可编辑 `cal.parameters` 表中的初值、上下界
+和线性/对数搜索尺度。结果写入 `Calibration/Results`。`cal.use_parallel=true`
+可以并行评估，但多年输入会占用多个工作进程的内存，应按机器容量开启。
 
 ---
 
@@ -297,6 +346,7 @@ sand_fraction + clay_fraction + silt_fraction ≈ 1
 | `soil_temperature` | 三层土壤温度 | K |
 | `canopy_water` | 冠层截留水 | kg m⁻² = mm |
 | `swe` | 雪水当量 | kg m⁻² = mm |
+| `groundwater_storage` | 概念地下水活动库储量 | kg m⁻² = mm |
 | `surface_temperature` | 地表温度 | K |
 
 初始状态代表第一个时间步开始前的状态。自动生成的初值是确定性启动场，不是相应日期的分析场。多年模拟应通过重复强迫或前置历史强迫进行水热 spin-up，并在储水量、深层土壤湿度和土壤温度年际漂移足够小时再开始正式分析。
@@ -316,20 +366,24 @@ sand_fraction + clay_fraction + silt_fraction ≈ 1
 
 ### 7.2 入渗、土壤水和径流
 
-- Green–Ampt 显式近似估算有效降雨历时内的累计入渗容量；
-- 入渗水自上而下填充三层孔隙；
-- 超过入渗能力的水形成超渗径流；
-- 超过总孔隙容量的水形成孔隙超量径流；
-- 超过田间持水量的水按 Clapp–Hornberger 非饱和导水率逐层向下排水；
-- 离开 1 m 土柱的排水记为基流。
+- 前两层 0–28 cm 的网格平均有效蓄水量控制产流；
+- VIC/新安江式蓄水容量分布表示一个大网格内部的土壤深度、地形和湿润程度差异；
+- 当蓄水增加时，饱和面积比例扩大，更多日液态水形成饱和超量地表径流；
+- `runoff_shape_parameter=0` 时严格退化为“填满后产流”的简单水桶；
+- 入渗水由上至下加入前两层，随后按 Clapp–Hornberger 非饱和导水率逐层排水；
+- 湿润时第二层部分排水形成壤中流，第三层渗漏进入概念地下水活动库；
+- 地下水以线性水库慢速退水形成基流，并能向低于田间持水量的第三层提供受限毛管补给。
 
-默认有效降雨历时：
+主要日尺度参数集中在配置中：
 
 ```matlab
-cfg.infiltration_rain_duration = 4*3600; % s
+cfg.runoff_shape_parameter = 0.30;       % 次网格蓄水容量曲线
+cfg.max_interflow_fraction = 0.15;       % 第二层排水的最大壤中流比例
+cfg.groundwater_recession_days = 120;   % 地下水慢库e折减时间
+cfg.capillary_rise_timescale_days = 60; % 地下水毛管补给时间尺度
 ```
 
-该参数需要结合小时降雨和径流资料率定，不是普适常数。
+这些是大尺度有效参数，应使用径流、土壤湿度、蒸散和地下水储量联合率定；它们不依赖虚构的小时降雨历时。
 
 ### 7.3 蒸散
 
@@ -344,6 +398,17 @@ cfg.infiltration_rain_duration = 4*3600; % s
 地表能量平衡包括吸收短波、向下和向上长波、感热、潜热、地表土壤热通量和融雪潜热。地表温度通过向量化二分求根获得。
 
 土壤热过程采用含水量相关热容量、简化 Johansen 热导率以及三层隐式守恒热传导，1 m 底部为绝热边界。
+
+### 7.5 方案来源与适用尺度
+
+当前水文结构是面向日尺度全球长期模拟的组合方案，并非任何现有模型的逐行复刻：
+
+- 次网格蓄水容量分布及饱和超量产流参考 [VIC](https://doi.org/10.1029/94JD00483) 和[新安江模型](https://doi.org/10.1016/0022-1694(92)90096-E)；
+- 简洁、连续的日尺度漏桶思想参考 [H08](https://doi.org/10.5194/hess-12-1007-2008)；
+- 土壤层—地下水活动库—基流结构及毛管补给思路参考 [PCR-GLOBWB 2](https://doi.org/10.5194/gmd-11-2429-2018)；
+- 地表能量平衡、三层土壤、分层根系吸水和独立河道路由的总体边界与 [VIC官方说明](https://vic.readthedocs.io/en/master/Overview/ModelOverview/)一致。
+
+这些模型共同说明：较粗时间分辨率可以通过守恒的有效参数化描述长期统计响应，但“等效”并不意味着能唯一恢复亚日洪峰。日强迫下应重点检验多年均值、季节循环、趋势、干湿异常持续性和储量变化，而不应将日径流解释为暴雨小时峰值。
 
 ---
 
@@ -361,6 +426,8 @@ cfg.infiltration_rain_duration = 4*3600; % s
 | `canopy_water` | 冠层截留水 | kg m⁻² |
 | `swe` | 雪水当量 | kg m⁻² |
 | `total_soil_water` | 0–100 cm 土壤总水柱 | kg m⁻² |
+| `groundwater_storage` | 概念地下水活动库储量 | kg m⁻² |
+| `total_water_storage` | 冠层 + 积雪 + 土壤 + 地下水总储量 | kg m⁻² |
 
 根区变量按土层厚度加权：
 
@@ -395,14 +462,21 @@ theta_day10_layer2 = output.soil_moisture(:,:,10,2);
 | `dew` | 进入陆面的露水 |
 | `snowfall` | 固态降水 |
 | `snowmelt` | 融雪内部转移量 |
-| `surface_runoff` | 超渗、孔隙超量和露水溢流径流 |
-| `baseflow` | 离开 1 m 土柱的重力排水 |
+| `infiltration` | 进入前两层土壤的液态水 |
+| `surface_runoff` | 饱和超量产流和露水溢流 |
+| `interflow` | 湿润土层的侧向壤中流 |
+| `groundwater_recharge` | 第三层进入地下水库的补给 |
+| `capillary_rise` | 地下水返回第三层土壤的毛管补给 |
+| `baseflow` | 地下水慢库退水 |
+| `total_runoff` | 地表径流 + 壤中流 + 基流 |
 
 总径流诊断应使用：
 
 ```matlab
-total_runoff = output.surface_runoff + output.baseflow;
+total_runoff = output.surface_runoff + output.interflow + output.baseflow;
 ```
+
+`saturated_area_fraction` 为产流计算开始时的次网格饱和面积比例，单位为 1。
 
 ### 8.3 能量和地表属性
 
@@ -415,6 +489,22 @@ total_runoff = output.surface_runoff + output.baseflow;
 | `lw_up` | 向上长波通量大小 | W m⁻² |
 | `albedo` | 地表短波反照率 | 1 |
 
+
+### 8.4 长期模拟输出聚合
+
+```matlab
+cfg.output_period_days = 1;   % 逐日输出，兼容当前逐日评估
+cfg.output_period_days = 30;  % 连续30日平均
+cfg.output_period_days = 365; % 固定365日平均，适合百年趋势
+```
+
+模式始终逐日积分；只有输出采用在线平均，不会把月/年平均强迫直接送入物理过程。状态和通量均保存该窗口的日平均值，水通量单位仍为 `kg m-2 day-1`。`output.time_end_day` 和 `output.period_day_count` 分别给出窗口结束日序和实际包含天数。
+
+当前 `Assessment/Obs.mat` 是逐日观测，因此使用 30/365 日聚合输出时应设置
+`cfg.assessment.enabled=false`，或另行制备完全相同聚合窗口的观测数据。
+
+
+
 ---
 
 ## 9. 守恒定义
@@ -423,10 +513,10 @@ total_runoff = output.surface_runoff + output.baseflow;
 
 ```text
 降水 + 露水
-= 蒸散 + 地表径流 + 基流 + 总储水变化 + water_balance_error
+= 蒸散 + 地表径流 + 壤中流 + 基流 + 总储水变化 + water_balance_error
 ```
 
-总储水包括冠层水、雪水当量和三层土壤水。
+总储水包括冠层水、雪水当量、三层土壤水和概念地下水活动库。地下水补给与毛管上升是内部交换，不重复计入外部源汇。
 
 地表能量闭合：
 
@@ -455,6 +545,21 @@ total_runoff = output.surface_runoff + output.baseflow;
 Obs.(模型输出变量名).(数据集名)
 ```
 
+评估函数会自动遍历 `Obs` 的所有顶层字段。只要 `output` 中存在同名数值字段，且空间、时间和分层尺寸完全一致，就会自动纳入评估，无需再修改评估函数。例如，新增径流观测只需：
+
+```matlab
+Obs.total_runoff.ERA5 = runoff_observation;
+```
+
+用户还可以继续增加任意变量。没有同名模式输出、尺寸不一致或没有共同有效样本的条目不会阻断其它变量，而会记录在 `assessment.discovery.skipped` 和 `Assessment/Results/assessment_skipped.csv` 中。新增变量的单位和可选分层标签可放在配置或 `ObsInfo` 中：
+
+```matlab
+ObsInfo.variable_units.my_variable = "kg m-2 day-1";
+ObsInfo.layer_labels.my_variable = ["surface","root zone"];
+```
+
+也可使用 `cfg.assessment.variable_units` 和 `cfg.assessment.layer_labels`；配置中的设置优先于 `ObsInfo`。
+
 当前示例包括 ERA5 土壤水热变量、GLEAM/PLSHv2/SiTHv2 蒸散以及 ERA5 湍流通量。ERA5 是再分析参考而非独立原位真值。
 
 评估采用共同有效样本和真实网格面积加权，偏差定义为：
@@ -467,6 +572,7 @@ bias = model - reference
 
 ```text
 Assessment/Results/assessment_summary.csv
+Assessment/Results/assessment_skipped.csv
 Assessment/Results/assessment.mat
 Assessment/Results/00_summary_skill.png
 Assessment/Results/*.png
@@ -474,7 +580,7 @@ Assessment/Results/*.png
 
 当 `cfg.assessment.remove=true` 时，评分域剔除格陵兰和多年日均降水小于 0.5 mm 的极干旱区。全球变化研究建议同时报告完整陆地、干旱区、高纬区和核心评分域。
 
-### 10.1 版本 1.0 的 10 年参考技能
+### 10.1 重构前版本 1.0 的 10 年参考技能
 
 | 变量 | 偏差 | RMSE | 相关系数 | KGE |
 |---|---:|---:|---:|---:|
@@ -502,7 +608,7 @@ results = runtests('tests');
 assertSuccess(results);
 ```
 
-测试覆盖配置与维度、土壤质地守恒重映射、水力参数、Green–Ampt 入渗、雨雪过程、365 日植被循环、分层输出、MAT 输入往返、综合评估以及水热守恒。
+测试覆盖配置与维度、土壤质地守恒重映射、水力参数、可变蓄水容量产流、地下水状态、聚合输出、雨雪过程、365 日植被循环、分层输出、MAT 输入往返、综合评估以及水热守恒。
 
 修改物理过程后，应同时运行单元测试和 10 年参考评估，确认目标变量得到改善且没有破坏守恒或其它通量。
 
@@ -517,11 +623,18 @@ MATLSM/
 │  ├─ read_input.m               输入组装
 │  ├─ run.m                      时间积分
 │  ├─ step.m                     单日水热过程
-│  ├─ green_ampt_capacity.m      Green–Ampt 入渗
+│  ├─ partition_surface_water.m  日尺度可变蓄水容量产流
+│  ├─ redistribute_water.m       土层—壤中流—地下水交换
 │  ├─ soil_hydraulic_from_texture.m
 │  ├─ evaluate_output.m          面积加权综合评估
 │  ├─ plot_evaluation.m          评估图件
-│  └─ summarize_diagnostics.m    守恒诊断
+│  ├─ summarize_diagnostics.m    守恒诊断
+│  ├─ calibrate.m                自动参数率定
+│  ├─ calibration_score.m        面积加权多目标损失
+│  └─ subset_calibration_problem.m 快速空间/时间抽样
+├─ Calibration/
+│  ├─ A1_Calibrate.m             自动率定入口
+│  └─ Results/                   参数、指标与率定结果
 ├─ Assessment/
 │  ├─ A1_GetObs.m                评估数据预处理
 │  └─ Results/                   评估表、MAT 与图件
@@ -537,21 +650,21 @@ MATLSM/
 
 ## 13. 推荐开发路线
 
-版本 1.x：
+近期优先事项：
 
-1. 完善强迫、日历、时间戳和评估域审计；
-2. 输出分层水量去向，诊断土壤偏干和基流偏大的来源；
-3. 率定土壤水力参数、根系分布和蒸散阻力；
-4. 增加按年分块写出、restart 和长时间模拟工作流；
-5. 加入独立站点和遥感土壤湿度验证。
+1. 使用径流、土壤湿度、蒸散和 GRACE 陆地水储量联合率定日尺度参数；
+2. 增加按年读取强迫和直接写入 MAT/HDF5 的低内存工作流；
+3. 完善 restart、spin-up 收敛判断和趋势不确定性分析；
+4. 加入独立站点、遥感土壤湿度及地下水观测验证；
+5. 增加独立河道路由模块，但保持与垂向陆面过程解耦。
 
 版本 2.0 候选方向：
 
-1. 基于总水势梯度的双向层间水通量或 Richards 方程；
-2. 更深土壤、地下水库和毛管上升；
-3. 多层土壤热过程和深层温度边界；
+1. 基于总水势梯度的双向层间水通量；
+2. 由含水层属性和地形约束的地下水位；
+3. 更深土壤和深层温度边界；
 4. 冻土水热耦合与多层积雪；
-5. 亚日强迫、次网格瓦片和河道路由。
+5. 次网格植被、雪和地形瓦片。
 
 ---
 
